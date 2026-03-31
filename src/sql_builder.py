@@ -1,22 +1,40 @@
 import re
 
 
-def _validate_column(col: str) -> bool:
-    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_.\s,()]*$', col))
+def _validate_identifier(ident: str) -> bool:
+    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', ident.strip()))
+
+
+def _validate_join_on(on_clause: str) -> bool:
+    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_.\s=,()]*$', on_clause.strip()))
+
+
+def _build_having_op(op: str) -> str:
+    mapping = {
+        "eq": "=", "gt": ">", "gte": ">=",
+        "lt": "<", "lte": "<=", "ne": "!=",
+    }
+    return mapping.get(op.lower(), "=")
 
 
 def build_sql(spec) -> tuple[str, list]:
     sql_parts = []
     params = []
 
+    select_kw = "SELECT DISTINCT" if spec.distinct else "SELECT"
     select_exprs = spec.select if spec.select else ["*"]
     for expr in select_exprs:
-        if not _validate_column(expr):
-            raise ValueError(f"Invalid select expression: {expr}")
-    sql_parts.append(f"SELECT {', '.join(select_exprs)}")
+        for part in re.split(r'\s+AS\s+', expr, flags=re.IGNORECASE):
+            for token in part.split(','):
+                token = token.strip()
+                if token and not _validate_identifier(token):
+                    raise ValueError(f"Invalid select expression: {expr}")
+    sql_parts.append(f"{select_kw} {', '.join(select_exprs)}")
 
     tables = spec.tables
     from_table = tables[0]
+    if not _validate_identifier(from_table.name) or not _validate_identifier(from_table.alias):
+        raise ValueError(f"Invalid table name or alias: {from_table.name} / {from_table.alias}")
     sql_parts.append(f"FROM {from_table.name} {from_table.alias}")
 
     if spec.joins:
@@ -25,16 +43,18 @@ def build_sql(spec) -> tuple[str, list]:
             if jtype not in ("INNER", "LEFT", "LEFT OUTER", "RIGHT", "RIGHT OUTER", "FULL", "CROSS"):
                 raise ValueError(f"Unsupported join type: {jtype}")
             on = j.get("on", "")
-            if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_.\s=,()]*$', on):
+            if not _validate_join_on(on):
                 raise ValueError(f"Invalid join condition: {on}")
             if len(tables) > 1:
                 right = tables[1]
+                if not _validate_identifier(right.name) or not _validate_identifier(right.alias):
+                    raise ValueError(f"Invalid join table name or alias: {right.name} / {right.alias}")
                 sql_parts.append(f"{jtype} JOIN {right.name} {right.alias} ON {on}")
 
     if spec.filters:
         conditions = []
         for col, fv in spec.filters.items():
-            if not _validate_column(col):
+            if not _validate_identifier(col):
                 raise ValueError(f"Invalid filter column: {col}")
             for op in ("eq", "gt", "gte", "lt", "lte", "like"):
                 val = getattr(fv, op, None)
@@ -55,6 +75,8 @@ def build_sql(spec) -> tuple[str, list]:
                     params.append(val)
             in_vals = getattr(fv, "in_", None)
             if in_vals is not None:
+                if len(in_vals) > 1000:
+                    raise ValueError("IN list cannot exceed 1000 items")
                 placeholders = []
                 for v in in_vals:
                     param_idx = len(params) + 1
@@ -66,14 +88,25 @@ def build_sql(spec) -> tuple[str, list]:
 
     if spec.groupBy:
         for g in spec.groupBy:
-            if not _validate_column(g):
+            if not _validate_identifier(g):
                 raise ValueError(f"Invalid groupBy column: {g}")
         sql_parts.append(f"GROUP BY {', '.join(spec.groupBy)}")
+
+    if spec.having:
+        having_parts = []
+        for h in spec.having:
+            if not _validate_identifier(h.column):
+                raise ValueError(f"Invalid HAVING column: {h.column}")
+            op = _build_having_op(h.op)
+            param_idx = len(params) + 1
+            having_parts.append(f"{h.column} {op} ${param_idx}")
+            params.append(h.value)
+        sql_parts.append(f"HAVING {' AND '.join(having_parts)}")
 
     if spec.orderBy:
         order_items = []
         for o in spec.orderBy:
-            if not _validate_column(o.column):
+            if not _validate_identifier(o.column):
                 raise ValueError(f"Invalid orderBy column: {o.column}")
             direction = "ASC" if o.dir.upper() in ("ASC", "DESC") else "ASC"
             order_items.append(f"{o.column} {direction}")
