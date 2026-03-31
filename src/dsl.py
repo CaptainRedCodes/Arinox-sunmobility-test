@@ -54,7 +54,25 @@ class QuerySpec(BaseModel):
     response_format: str = "json"
 
 
-ALLOWED_TABLES = {"orders", "customers"}
+ALLOWED_TABLES = {"station_data"}
+
+ALLOWED_COLUMNS = {
+    "station_data": {
+        "Transaction Id", "Station Id", "Vehicle Id", "Swap Start Time",
+        "Swap End Time", "Duration (In Sec)", "Received BP Id",
+        "Received BP Id Type", "Received Dock Id", "Received mDock Id",
+        "Received SOC", "RegenAh", "Max Temp", "Issued BP Id",
+        "Issued BP Id Type", "Issued Dock Id", "Issued SOC",
+        "SOC Utilization", "Swap Type", "Total kWh Consumed",
+        "Target DockId", "Cold TPH", "VType", "No. of BPs",
+        "Status", "Status Reason", "Failure Reason",
+        "Received PostSwap BpId", "Received PostSwap CycleNumber",
+        "Received PostSwap PackVoltage", "Received PostSwap kwHr",
+        "Received PostSwap Soc", "Received PostSwap CycleTime",
+        "Received PostSwap AmpHr", "Received PostSwap Distance(GPS)",
+        "Received PostSwap Distance(CAN)", "sd_id",
+    },
+}
 
 
 def decode_instruction(instruction_str: str) -> QuerySpec:

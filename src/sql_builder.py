@@ -1,12 +1,20 @@
 import re
+from src.dsl import ALLOWED_COLUMNS
 
 
-def _validate_identifier(ident: str) -> bool:
-    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', ident.strip()))
+def _validate_column(col: str, table_name: str) -> bool:
+    allowed = ALLOWED_COLUMNS.get(table_name)
+    if allowed is None:
+        return False
+    return col.strip() in allowed
+
+
+def _validate_alias(alias: str) -> bool:
+    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', alias.strip()))
 
 
 def _validate_join_on(on_clause: str) -> bool:
-    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_.\s=,()]*$', on_clause.strip()))
+    return bool(re.match(r'^[a-zA-Z_"().\s=,]*$', on_clause.strip()))
 
 
 def _build_having_op(op: str) -> str:
@@ -17,6 +25,10 @@ def _build_having_op(op: str) -> str:
     return mapping.get(op.lower(), "=")
 
 
+def _quote_col(col: str) -> str:
+    return f'"{col.strip()}"'
+
+
 def build_sql(spec) -> tuple[str, list]:
     sql_parts = []
     params = []
@@ -24,18 +36,22 @@ def build_sql(spec) -> tuple[str, list]:
     select_kw = "SELECT DISTINCT" if spec.distinct else "SELECT"
     select_exprs = spec.select if spec.select else ["*"]
     for expr in select_exprs:
-        for part in re.split(r'\s+AS\s+', expr, flags=re.IGNORECASE):
-            for token in part.split(','):
-                token = token.strip()
-                if token and not _validate_identifier(token):
-                    raise ValueError(f"Invalid select expression: {expr}")
+        if expr.strip() == "*":
+            continue
+        alias_match = re.split(r'\s+AS\s+', expr, flags=re.IGNORECASE)
+        col_part = alias_match[0].strip()
+        for t in spec.tables:
+            if _validate_column(col_part, t.name):
+                break
+        else:
+            raise ValueError(f"Column '{col_part}' not found in any allowed table")
     sql_parts.append(f"{select_kw} {', '.join(select_exprs)}")
 
     tables = spec.tables
     from_table = tables[0]
-    if not _validate_identifier(from_table.name) or not _validate_identifier(from_table.alias):
-        raise ValueError(f"Invalid table name or alias: {from_table.name} / {from_table.alias}")
-    sql_parts.append(f"FROM {from_table.name} {from_table.alias}")
+    if not _validate_alias(from_table.alias):
+        raise ValueError(f"Invalid alias: {from_table.alias}")
+    sql_parts.append(f'FROM "{from_table.name}" {from_table.alias}')
 
     if spec.joins:
         for j in spec.joins:
@@ -47,31 +63,37 @@ def build_sql(spec) -> tuple[str, list]:
                 raise ValueError(f"Invalid join condition: {on}")
             if len(tables) > 1:
                 right = tables[1]
-                if not _validate_identifier(right.name) or not _validate_identifier(right.alias):
-                    raise ValueError(f"Invalid join table name or alias: {right.name} / {right.alias}")
-                sql_parts.append(f"{jtype} JOIN {right.name} {right.alias} ON {on}")
+                if not _validate_alias(right.alias):
+                    raise ValueError(f"Invalid alias: {right.alias}")
+                sql_parts.append(f'{jtype} JOIN "{right.name}" {right.alias} ON {on}')
 
     if spec.filters:
         conditions = []
         for col, fv in spec.filters.items():
-            if not _validate_identifier(col):
-                raise ValueError(f"Invalid filter column: {col}")
+            col_table = None
+            for t in spec.tables:
+                if _validate_column(col, t.name):
+                    col_table = t.name
+                    break
+            if col_table is None:
+                raise ValueError(f"Filter column '{col}' not found in any allowed table")
             for op in ("eq", "gt", "gte", "lt", "lte", "like"):
                 val = getattr(fv, op, None)
                 if val is not None:
                     param_idx = len(params) + 1
+                    quoted = _quote_col(col)
                     if op == "eq":
-                        conditions.append(f"{col} = ${param_idx}")
+                        conditions.append(f"{quoted} = ${param_idx}")
                     elif op == "gt":
-                        conditions.append(f"{col} > ${param_idx}")
+                        conditions.append(f"{quoted} > ${param_idx}")
                     elif op == "gte":
-                        conditions.append(f"{col} >= ${param_idx}")
+                        conditions.append(f"{quoted} >= ${param_idx}")
                     elif op == "lt":
-                        conditions.append(f"{col} < ${param_idx}")
+                        conditions.append(f"{quoted} < ${param_idx}")
                     elif op == "lte":
-                        conditions.append(f"{col} <= ${param_idx}")
+                        conditions.append(f"{quoted} <= ${param_idx}")
                     elif op == "like":
-                        conditions.append(f"{col} ILIKE ${param_idx}")
+                        conditions.append(f"{quoted} ILIKE ${param_idx}")
                     params.append(val)
             in_vals = getattr(fv, "in_", None)
             if in_vals is not None:
@@ -82,21 +104,20 @@ def build_sql(spec) -> tuple[str, list]:
                     param_idx = len(params) + 1
                     placeholders.append(f"${param_idx}")
                     params.append(v)
-                conditions.append(f"{col} IN ({', '.join(placeholders)})")
+                conditions.append(f"{_quote_col(col)} IN ({', '.join(placeholders)})")
         if conditions:
             sql_parts.append(f"WHERE {' AND '.join(conditions)}")
 
     if spec.groupBy:
         for g in spec.groupBy:
-            if not _validate_identifier(g):
-                raise ValueError(f"Invalid groupBy column: {g}")
-        sql_parts.append(f"GROUP BY {', '.join(spec.groupBy)}")
+            found = any(_validate_column(g, t.name) for t in spec.tables)
+            if not found:
+                raise ValueError(f"groupBy column '{g}' not found in any allowed table")
+        sql_parts.append(f"GROUP BY {', '.join(_quote_col(g) for g in spec.groupBy)}")
 
     if spec.having:
         having_parts = []
         for h in spec.having:
-            if not _validate_identifier(h.column):
-                raise ValueError(f"Invalid HAVING column: {h.column}")
             op = _build_having_op(h.op)
             param_idx = len(params) + 1
             having_parts.append(f"{h.column} {op} ${param_idx}")
@@ -106,10 +127,11 @@ def build_sql(spec) -> tuple[str, list]:
     if spec.orderBy:
         order_items = []
         for o in spec.orderBy:
-            if not _validate_identifier(o.column):
-                raise ValueError(f"Invalid orderBy column: {o.column}")
+            found = any(_validate_column(o.column, t.name) for t in spec.tables)
+            if not found:
+                raise ValueError(f"orderBy column '{o.column}' not found in any allowed table")
             direction = "ASC" if o.dir.upper() in ("ASC", "DESC") else "ASC"
-            order_items.append(f"{o.column} {direction}")
+            order_items.append(f"{_quote_col(o.column)} {direction}")
         sql_parts.append(f"ORDER BY {', '.join(order_items)}")
 
     sql_parts.append(f"LIMIT ${len(params) + 1}")
