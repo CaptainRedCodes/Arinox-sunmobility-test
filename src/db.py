@@ -24,9 +24,9 @@ async def get_pool() -> asyncpg.Pool:
         _pool = await asyncpg.create_pool(
             dsn=os.getenv("DATABASE_URL"),
             ssl=_ssl_ctx(),
-            min_size=2,
-            max_size=10,
-            command_timeout=60,
+            min_size=1,
+            max_size=3,
+            command_timeout=30,
         )
     return _pool
 
@@ -37,9 +37,9 @@ async def get_pool_readonly() -> asyncpg.Pool:
         _pool_readonly = await asyncpg.create_pool(
             dsn=os.getenv("DATABASE_URL"),
             ssl=_ssl_ctx(),
-            min_size=2,
-            max_size=10,
-            command_timeout=60,
+            min_size=1,
+            max_size=3,
+            command_timeout=30,
             server_settings={
                 "default_transaction_read_only": "on",
                 "statement_timeout": "30000",
