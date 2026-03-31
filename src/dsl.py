@@ -75,8 +75,13 @@ ALLOWED_COLUMNS = {
 }
 
 
-def decode_instruction(instruction_str: str) -> QuerySpec:
-    raw = json.loads(instruction_str)
+def decode_instruction(instruction) -> QuerySpec:
+    if isinstance(instruction, str):
+        raw = json.loads(instruction)
+    elif isinstance(instruction, dict):
+        raw = instruction
+    else:
+        raise ValueError(f"instruction must be str or dict, got {type(instruction).__name__}")
     spec = QuerySpec(**raw)
     if len(spec.tables) == 0:
         raise ValueError("At least one table is required")
