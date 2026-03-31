@@ -73,11 +73,11 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/api/v1/query", response_model=QueryResponse)
-async def handle_query(req: QueryRequest, _=Depends(verify_api_key)):
+async def _run_query(instruction: str) -> QueryResponse:
+    """Shared query logic for both GET and POST endpoints."""
     start = time.time()
     try:
-        spec = decode_instruction(req.instruction)
+        spec = decode_instruction(instruction)
         instruction_id = spec.instruction_id or "unknown"
         sql, params = build_sql(spec)
 
@@ -118,6 +118,42 @@ async def handle_query(req: QueryRequest, _=Depends(verify_api_key)):
     except Exception as e:
         logger.error(f"query_error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/query", response_model=QueryResponse)
+async def handle_query(request: Request, _=Depends(verify_api_key)):
+    # Try body first, then fall back to X-Instruction header
+    instruction = None
+    try:
+        body = await request.json()
+        instruction = body.get("instruction")
+    except Exception:
+        pass
+    if not instruction:
+        instruction = request.headers.get("X-Instruction")
+    if not instruction:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide instruction in JSON body or X-Instruction header",
+        )
+    return await _run_query(instruction)
+
+
+@app.get("/api/v1/query", response_model=QueryResponse)
+async def handle_query_get(
+    request: Request,
+    instruction: str | None = None,
+    _=Depends(verify_api_key),
+):
+    # Priority: query param > header
+    instr = instruction or request.headers.get("X-Instruction")
+    if not instr:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide instruction as ?instruction= query param or X-Instruction header",
+        )
+    return await _run_query(instr)
+
 
 
 @app.post("/api/v1/query/stream")
