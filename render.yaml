@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sunmobility-fastapi
+    env: docker
+    region: oregon
+    plan: starter
+    buildCommand: ""
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: PORT
+        value: 8000
+    healthCheckPath: /healthz
