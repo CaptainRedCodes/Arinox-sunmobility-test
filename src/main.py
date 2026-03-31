@@ -24,8 +24,22 @@ from src.security import verify_api_key
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-SLOW_QUERY_THRESHOLD_MS = float(os.getenv("SLOW_QUERY_THRESHOLD_MS", "2000"))
-REQUEST_TIMEOUT_MS = int(os.getenv("REQUEST_TIMEOUT_MS", "30000"))
+def _safe_int(val: str | None, default: int) -> int:
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(val: str | None, default: float) -> float:
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+SLOW_QUERY_THRESHOLD_MS = _safe_float(os.getenv("SLOW_QUERY_THRESHOLD_MS"), 2000)
+REQUEST_TIMEOUT_MS = _safe_int(os.getenv("REQUEST_TIMEOUT_MS"), 30000)
 
 
 class TimeoutMiddleware(BaseHTTPMiddleware):
