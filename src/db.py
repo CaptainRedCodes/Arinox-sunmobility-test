@@ -21,30 +21,45 @@ def _ssl_ctx():
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(
-            dsn=os.getenv("DATABASE_URL"),
-            ssl=_ssl_ctx(),
-            min_size=1,
-            max_size=3,
-            command_timeout=30,
-        )
+        dsn = os.getenv("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL environment variable is not set")
+        logger.info(f"Connecting to DB: {dsn[:30]}...")
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn=dsn,
+                ssl=_ssl_ctx(),
+                min_size=1,
+                max_size=3,
+                command_timeout=30,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create DB pool: {e}")
+            raise
     return _pool
 
 
 async def get_pool_readonly() -> asyncpg.Pool:
     global _pool_readonly
     if _pool_readonly is None:
-        _pool_readonly = await asyncpg.create_pool(
-            dsn=os.getenv("DATABASE_URL"),
-            ssl=_ssl_ctx(),
-            min_size=1,
-            max_size=3,
-            command_timeout=30,
-            server_settings={
-                "default_transaction_read_only": "on",
-                "statement_timeout": "30000",
-            },
-        )
+        dsn = os.getenv("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL environment variable is not set")
+        try:
+            _pool_readonly = await asyncpg.create_pool(
+                dsn=dsn,
+                ssl=_ssl_ctx(),
+                min_size=1,
+                max_size=3,
+                command_timeout=30,
+                server_settings={
+                    "default_transaction_read_only": "on",
+                    "statement_timeout": "30000",
+                },
+            )
+        except Exception as e:
+            logger.error(f"Failed to create read-only DB pool: {e}")
+            raise
     return _pool_readonly
 
 
