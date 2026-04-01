@@ -54,7 +54,7 @@ class QuerySpec(BaseModel):
     response_format: str = "json"
 
 
-ALLOWED_TABLES = {"station_data"}
+ALLOWED_TABLES = {"station_data","vehicle_data"}
 
 ALLOWED_COLUMNS = {
     "station_data": {
@@ -70,7 +70,7 @@ ALLOWED_COLUMNS = {
         "Received PostSwap PackVoltage", "Received PostSwap kwHr",
         "Received PostSwap Soc", "Received PostSwap CycleTime",
         "Received PostSwap AmpHr", "Received PostSwap Distance(GPS)",
-        "Received PostSwap Distance(CAN)", "sd_id",
+        "Received PostSwap Distance(CAN)", "sd_id","vd_id"
     },
 }
 
